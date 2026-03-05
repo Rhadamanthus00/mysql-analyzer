@@ -12,11 +12,48 @@ function removeToken(): void {
   localStorage.removeItem('mysql_analyzer_token');
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 30000): Promise<Response> {
+// 网络连通性状态
+let _backendReachable: boolean | null = null;
+let _preheatPromise: Promise<void> | null = null;
+
+// 页面加载时预热后端（唤醒 Vercel 冷启动 + 检测网络连通性）
+function preheatBackend(): Promise<void> {
+  if (!_preheatPromise) {
+    _preheatPromise = (async () => {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`${API_BASE}/api/health`, {
+          signal: controller.signal,
+          mode: 'cors',
+        });
+        clearTimeout(timer);
+        _backendReachable = res.ok;
+      } catch {
+        _backendReachable = false;
+      }
+    })();
+  }
+  return _preheatPromise;
+}
+
+// 立即开始预热
+preheatBackend();
+
+// 判断是否为国内手机网络环境（无法连通 Vercel）
+function getNetworkErrorMessage(): string {
+  if (_backendReachable === false) {
+    return '无法连接服务器。可能由于国内网络限制，请尝试使用 WiFi 或开启网络代理后重试';
+  }
+  return '网络连接失败，请检查网络后重试';
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 15000): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { ...options, signal: controller.signal });
+    _backendReachable = true;
     return res;
   } catch (err: any) {
     if (err.name === 'AbortError') {
@@ -38,6 +75,9 @@ async function request<T>(path: string, options: RequestInit = {}, retries = 2):
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  // 等待预热完成（最多等 1 秒，不阻塞太久）
+  await Promise.race([_preheatPromise, new Promise(r => setTimeout(r, 1000))]);
+
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -45,7 +85,7 @@ async function request<T>(path: string, options: RequestInit = {}, retries = 2):
         ...options,
         headers,
         mode: 'cors' as RequestMode,
-      }, 30000);
+      }, 15000);
 
       if (res.status === 401) {
         removeToken();
@@ -59,11 +99,9 @@ async function request<T>(path: string, options: RequestInit = {}, retries = 2):
       return data;
     } catch (err: any) {
       lastError = err;
-      // 不重试认证错误
       if (err.message === '登录已过期，请重新登录') {
         throw err;
       }
-      // 判断是否为网络/超时类可重试错误
       const isRetryable = !err.message || err.message.includes('超时') ||
         err.message.includes('Failed to fetch') || err.message.includes('Load failed') ||
         err.message.includes('NetworkError') || err.message.includes('network') ||
@@ -71,19 +109,22 @@ async function request<T>(path: string, options: RequestInit = {}, retries = 2):
       if (!isRetryable) {
         throw err;
       }
-      // 最后一次尝试也失败了
       if (attempt === retries) {
-        // 将原始错误转换为用户友好提示
-        if (err.message?.includes('Failed to fetch') || err.message?.includes('Load failed')) {
-          throw new Error('网络连接失败，请检查网络后重试');
+        if (err.message?.includes('Failed to fetch') || err.message?.includes('Load failed') ||
+            err.name === 'TypeError') {
+          throw new Error(getNetworkErrorMessage());
         }
         throw err;
       }
-      // 等待后重试（递增退避）
-      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
     }
   }
   throw lastError || new Error('请求失败');
+}
+
+// 暴露给外部检查网络状态
+export function isBackendReachable(): boolean | null {
+  return _backendReachable;
 }
 
 // ============ Auth API ============

@@ -5,10 +5,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { useAuth, type OAuthProvider } from '@/contexts/AuthContext'
+import { isBackendReachable } from '@/lib/api'
 import {
   Database, Eye, EyeOff, ArrowLeft, Loader2,
   Lock, Mail, User, UserPlus, LogIn, ChevronRight,
-  CheckCircle2, X, ExternalLink, ShieldCheck
+  CheckCircle2, X, ExternalLink, ShieldCheck, AlertTriangle
 } from 'lucide-react'
 import type { Route } from '@/App'
 
@@ -415,6 +416,17 @@ export default function AuthPage({ onNavigate }: AuthPageProps) {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* 网络状态提示 */}
+            {isBackendReachable() === false && (
+              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium">服务器连接异常</p>
+                  <p className="text-xs text-amber-400/70 mt-0.5">国内网络可能无法直接访问服务器，建议使用 WiFi 或开启网络代理后刷新重试</p>
+                </div>
+              </div>
+            )}
+
             {/* OAuth 第三方登录 */}
             <div className="grid grid-cols-3 gap-3">
               <Button
