@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -87,6 +87,42 @@ const oauthConfigs: Record<OAuthProvider, {
     scopes: ['read:user', 'user:email'],
     description: 'GitHub 将共享您的用户名、邮箱和公开个人资料',
   },
+}
+
+// OAuth 加载步骤 — 渐进提示，避免用户以为卡死
+function LoadingStep({ config }: { config: typeof oauthConfigs[OAuthProvider] }) {
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => setElapsed(s => s + 1), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const hint = elapsed < 3
+    ? '正在验证授权并获取用户信息...'
+    : elapsed < 8
+    ? '服务器正在响应，请耐心等待...'
+    : '首次连接可能较慢，即将完成...'
+
+  return (
+    <div className="py-8 text-center space-y-4">
+      <div className="relative mx-auto w-16 h-16">
+        <div className={`absolute inset-0 rounded-full border-2 ${config.borderColor} opacity-30`} />
+        <div className={`absolute inset-0 rounded-full border-2 border-transparent ${config.borderColor} border-t-current animate-spin`} />
+        <div className="absolute inset-3 flex items-center justify-center">
+          {config.icon}
+        </div>
+      </div>
+      <div>
+        <p className="text-white font-medium">正在与 {config.name} 通信</p>
+        <p className="text-sm text-slate-500 mt-1">{hint}</p>
+      </div>
+      <div className="flex justify-center gap-1">
+        <div className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+        <div className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+        <div className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+      </div>
+    </div>
+  )
 }
 
 // OAuth 授权弹窗组件
@@ -183,24 +219,7 @@ function OAuthDialog({
           )}
 
           {step === 'loading' && (
-            <div className="py-8 text-center space-y-4">
-              <div className="relative mx-auto w-16 h-16">
-                <div className={`absolute inset-0 rounded-full border-2 ${config.borderColor} opacity-30`} />
-                <div className={`absolute inset-0 rounded-full border-2 border-transparent ${config.borderColor} border-t-current animate-spin`} />
-                <div className="absolute inset-3 flex items-center justify-center">
-                  {config.icon}
-                </div>
-              </div>
-              <div>
-                <p className="text-white font-medium">正在与 {config.name} 通信</p>
-                <p className="text-sm text-slate-500 mt-1">正在验证授权并获取用户信息...</p>
-              </div>
-              <div className="flex justify-center gap-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
+            <LoadingStep config={config} />
           )}
 
           {step === 'error' && (
