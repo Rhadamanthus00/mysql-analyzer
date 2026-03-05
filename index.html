@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MySQL Source Code Analyzer</title>
     <script type="module" crossorigin src="./assets/index-0YrtlX9V.js"></script>
+    <!-- Vercel 后端预热：页面加载时立即 ping，消除冷启动延迟 -->
+    <script>
+    (function(){
+      var API = 'https://mysql-analyzer-backend.vercel.app';
+      fetch(API + '/api/health?ping=1', { method: 'GET', cache: 'no-store' }).catch(function(){});
+      setTimeout(function(){
+        fetch(API + '/api/donate', { method: 'GET', cache: 'no-store' }).catch(function(){});
+      }, 200);
+    })();
+    </script>
     <link rel="stylesheet" crossorigin href="./assets/index-kJVcL9mh.css">
     <style>
       /* 强制修改密码弹窗样式 */
