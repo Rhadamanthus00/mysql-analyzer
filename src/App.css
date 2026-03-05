@@ -1,0 +1,38 @@
+/* Custom styles for MySQL Analyzer */
+
+/* Gradient text for emphasis */
+.gradient-text {
+  @apply bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent;
+}
+
+/* Custom scrollbar for code blocks */
+.code-block {
+  @apply overflow-auto max-h-96;
+}
+
+/* Node connector lines */
+.node-connector {
+  @apply absolute left-4 top-full w-0.5 bg-gradient-to-b from-blue-500 to-transparent;
+}
+
+/* GDB terminal styling */
+.gdb-terminal {
+  @apply bg-black text-green-400 font-mono p-4 rounded-lg text-sm;
+}
+
+/* Status indicator */
+.status-indicator {
+  @apply inline-flex items-center gap-1.5;
+}
+
+.status-dot {
+  @apply w-2 h-2 rounded-full;
+}
+
+.status-dot.active {
+  @apply bg-green-500;
+}
+
+.status-dot.inactive {
+  @apply bg-gray-500;
+}
