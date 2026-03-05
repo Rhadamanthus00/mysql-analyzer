@@ -12,7 +12,7 @@ function removeToken(): void {
   localStorage.removeItem('mysql_analyzer_token');
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 15000): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 30000): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -20,7 +20,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 1
     return res;
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      throw new Error('请求超时，请检查网络后重试');
+      throw new Error('请求超时，服务器响应较慢，请稍后重试');
     }
     throw err;
   } finally {
@@ -28,7 +28,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 1
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}, retries = 1): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, retries = 2): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -44,9 +44,8 @@ async function request<T>(path: string, options: RequestInit = {}, retries = 1):
       const res = await fetchWithTimeout(`${API_BASE}${path}`, {
         ...options,
         headers,
-        // 手机微信浏览器需要显式设置 mode 和 credentials
         mode: 'cors' as RequestMode,
-      }, 15000);
+      }, 30000);
 
       if (res.status === 401) {
         removeToken();
@@ -60,16 +59,28 @@ async function request<T>(path: string, options: RequestInit = {}, retries = 1):
       return data;
     } catch (err: any) {
       lastError = err;
-      // 不重试认证错误和业务错误
-      if (err.message === '登录已过期，请重新登录' || (err.message && !err.message.includes('超时') && !err.message.includes('Failed to fetch') && !err.message.includes('NetworkError') && !err.message.includes('network'))) {
+      // 不重试认证错误
+      if (err.message === '登录已过期，请重新登录') {
+        throw err;
+      }
+      // 判断是否为网络/超时类可重试错误
+      const isRetryable = !err.message || err.message.includes('超时') ||
+        err.message.includes('Failed to fetch') || err.message.includes('Load failed') ||
+        err.message.includes('NetworkError') || err.message.includes('network') ||
+        err.message.includes('fetch');
+      if (!isRetryable) {
         throw err;
       }
       // 最后一次尝试也失败了
       if (attempt === retries) {
+        // 将原始错误转换为用户友好提示
+        if (err.message?.includes('Failed to fetch') || err.message?.includes('Load failed')) {
+          throw new Error('网络连接失败，请检查网络后重试');
+        }
         throw err;
       }
-      // 等待后重试
-      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      // 等待后重试（递增退避）
+      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
     }
   }
   throw lastError || new Error('请求失败');
