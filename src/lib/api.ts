@@ -87,14 +87,25 @@ export interface SystemStatsData {
 }
 
 export const authApi = {
-  async login(username: string, password: string): Promise<{ success: boolean; user?: UserData; token?: string; error?: string }> {
+  async login(username: string, password: string): Promise<{ success: boolean; user?: UserData; token?: string; requirePasswordChange?: boolean; error?: string }> {
     try {
-      const data = await request<{ success: boolean; user: UserData; token: string }>('/api/auth/login', {
+      const data = await request<{ success: boolean; user: UserData; token: string; requirePasswordChange?: boolean }>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ username, password }),
       });
       if (data.token) setToken(data.token);
       return data;
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  },
+
+  async changePassword(currentPassword: string | undefined, newPassword: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      return await request('/api/auth/change-password', {
+        method: 'PUT',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
     } catch (e: any) {
       return { success: false, error: e.message };
     }
@@ -124,7 +135,7 @@ export const authApi = {
     }
   },
 
-  async getMe(): Promise<{ user: UserData } | null> {
+  async getMe(): Promise<{ user: UserData; requirePasswordChange?: boolean } | null> {
     try {
       return await request('/api/auth/me');
     } catch {

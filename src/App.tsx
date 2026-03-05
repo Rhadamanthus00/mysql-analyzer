@@ -11,6 +11,7 @@ import CallChainPage from '@/pages/CallChainPage'
 import VersionConfigPage from '@/pages/VersionConfigPage'
 import AuthPage from '@/pages/AuthPage'
 import AdminPage from '@/pages/AdminPage'
+import ForcePasswordChangeDialog from '@/components/ForcePasswordChangeDialog'
 
 export type Route = 'landing' | 'analyzer' | 'callgraph' | 'masterthread' | 'gdblab' | 'flamegraph' | 'callchain' | 'versionconfig' | 'auth' | 'admin'
 
@@ -22,7 +23,7 @@ const ADMIN_ROUTES: Route[] = ['admin']
 
 function AppRoutes() {
   const [currentRoute, setCurrentRoute] = useState<Route>('landing')
-  const { isAuthenticated, isAdmin, loading } = useAuth()
+  const { isAuthenticated, isAdmin, loading, requirePasswordChange } = useAuth()
 
   if (loading) {
     return (
@@ -87,7 +88,12 @@ function AppRoutes() {
     }
   }
 
-  return <>{renderPage()}</>
+  return (
+    <>
+      {renderPage()}
+      {requirePasswordChange && <ForcePasswordChangeDialog />}
+    </>
+  )
 }
 
 export default function App() {

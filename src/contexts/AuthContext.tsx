@@ -21,9 +21,11 @@ interface AuthContextType {
   isAuthenticated: boolean
   isAdmin: boolean
   loading: boolean
+  requirePasswordChange: boolean
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>
   register: (username: string, email: string, password: string, displayName: string) => Promise<{ success: boolean; error?: string }>
   oauthLogin: (provider: OAuthProvider) => Promise<{ success: boolean; error?: string }>
+  changePassword: (currentPassword: string | undefined, newPassword: string) => Promise<{ success: boolean; error?: string }>
   logout: () => void
   // 管理员功能
   getAllUsers: () => Promise<User[]>
@@ -48,6 +50,7 @@ const AuthContext = createContext<AuthContextType | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [requirePasswordChange, setRequirePasswordChange] = useState(false)
   const [donateConfig, setDonateConfig] = useState<DonateConfig>({
     enabled: false,
     qrcodeImage: '',
@@ -70,6 +73,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const result = await authApi.getMe()
         if (result?.user) {
           setUser(result.user)
+          if (result.requirePasswordChange) {
+            setRequirePasswordChange(true)
+          }
         }
       }
       setLoading(false)
@@ -81,6 +87,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await authApi.login(username, password)
     if (result.success && result.user) {
       setUser(result.user)
+      if (result.requirePasswordChange) {
+        setRequirePasswordChange(true)
+      }
     }
     return { success: result.success, error: result.error }
   }
@@ -97,9 +106,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: result.success, error: result.error }
   }
 
+  const changePassword = async (currentPassword: string | undefined, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    const result = await authApi.changePassword(currentPassword, newPassword)
+    if (result.success) {
+      setRequirePasswordChange(false)
+    }
+    return result
+  }
+
   const logout = () => {
     authApi.logout()
     setUser(null)
+    setRequirePasswordChange(false)
   }
 
   const recordUsage = (module: string, action: string, details?: string) => {
@@ -156,9 +174,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: !!user,
       isAdmin: user?.role === 'admin',
       loading,
+      requirePasswordChange,
       login,
       register,
       oauthLogin,
+      changePassword,
       logout,
       getAllUsers,
       getUsageRecords,

@@ -523,14 +523,7 @@ export default function AuthPage({ onNavigate }: AuthPageProps) {
               </button>
             </div>
 
-            {/* 管理员提示 */}
-            {mode === 'login' && (
-              <div className="text-center">
-                <p className="text-[11px] text-slate-600">
-                  管理员账号: admin / admin@0305
-                </p>
-              </div>
-            )}
+
           </CardContent>
         </Card>
       </div>
