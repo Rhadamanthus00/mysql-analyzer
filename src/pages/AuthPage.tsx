@@ -95,17 +95,19 @@ function OAuthDialog({
   step,
   onAuthorize,
   onCancel,
+  errorMsg,
 }: {
   provider: OAuthProvider
-  step: 'authorize' | 'loading' | 'success'
+  step: 'authorize' | 'loading' | 'success' | 'error'
   onAuthorize: () => void
   onCancel: () => void
+  errorMsg?: string
 }) {
   const config = oauthConfigs[provider]
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={step !== 'loading' ? onCancel : undefined} />
       <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* 顶部：模拟浏览器地址栏 */}
         <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 border-b border-slate-700">
@@ -201,6 +203,33 @@ function OAuthDialog({
             </div>
           )}
 
+          {step === 'error' && (
+            <div className="py-8 text-center space-y-4">
+              <div className="mx-auto w-16 h-16 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center">
+                <X className="w-8 h-8 text-red-400" />
+              </div>
+              <div>
+                <p className="text-white font-medium">授权失败</p>
+                <p className="text-sm text-slate-400 mt-1">{errorMsg || '网络连接异常，请重试'}</p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white"
+                  onClick={onCancel}
+                >
+                  取消
+                </Button>
+                <Button
+                  className={`flex-1 ${config.bgColor} hover:opacity-90 text-white`}
+                  onClick={onAuthorize}
+                >
+                  重试
+                </Button>
+              </div>
+            </div>
+          )}
+
           {step === 'success' && (
             <div className="py-8 text-center space-y-4">
               <div className="mx-auto w-16 h-16 rounded-full bg-green-500/20 border border-green-500/30 flex items-center justify-center">
@@ -228,7 +257,8 @@ export default function AuthPage({ onNavigate }: AuthPageProps) {
 
   // OAuth 弹窗状态
   const [oauthProvider, setOauthProvider] = useState<OAuthProvider | null>(null)
-  const [oauthStep, setOauthStep] = useState<'authorize' | 'loading' | 'success'>('authorize')
+  const [oauthStep, setOauthStep] = useState<'authorize' | 'loading' | 'success' | 'error'>('authorize')
+  const [oauthError, setOauthError] = useState('')
 
   // 表单字段
   const [username, setUsername] = useState('')
@@ -284,6 +314,7 @@ export default function AuthPage({ onNavigate }: AuthPageProps) {
   const handleOAuthAuthorize = async () => {
     if (!oauthProvider) return
     setOauthStep('loading')
+    setOauthError('')
 
     try {
       const result = await oauthLogin(oauthProvider)
@@ -294,12 +325,12 @@ export default function AuthPage({ onNavigate }: AuthPageProps) {
           onNavigate('landing')
         }, 800)
       } else {
-        setOauthProvider(null)
-        setError(result.error || '第三方授权失败')
+        setOauthStep('error')
+        setOauthError(result.error || '授权失败，请重试')
       }
     } catch {
-      setOauthProvider(null)
-      setError('授权过程发生错误，请重试')
+      setOauthStep('error')
+      setOauthError('网络连接异常，请检查网络后重试')
     }
   }
 
@@ -328,6 +359,7 @@ export default function AuthPage({ onNavigate }: AuthPageProps) {
           step={oauthStep}
           onAuthorize={handleOAuthAuthorize}
           onCancel={() => setOauthProvider(null)}
+          errorMsg={oauthError}
         />
       )}
 

@@ -59,7 +59,7 @@ function ProviderIcon({ provider, className }: { provider: string; className?: s
 }
 
 export default function AdminPage({ onNavigate }: AdminPageProps) {
-  const { user, isAdmin, logout, donateConfig, updateDonateConfig, uploadQrcode, deleteQrcode, getAllUsers, getUsageRecords, getSystemStats, deleteUser, toggleUserRole } = useAuth()
+  const { user, isAdmin, logout, donateConfig, loadFullDonateConfig, updateDonateConfig, uploadQrcode, deleteQrcode, getAllUsers, getUsageRecords, getSystemStats, deleteUser, toggleUserRole } = useAuth()
   const [activeTab, setActiveTab] = useState<AdminTab>('overview')
   const [searchQuery, setSearchQuery] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
@@ -100,6 +100,13 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
     setDonateTitle(donateConfig.title)
     setDonateDesc(donateConfig.description)
   }, [donateConfig.title, donateConfig.description])
+
+  // Load full donate config (with qrcode image) when switching to donate tab
+  useEffect(() => {
+    if (activeTab === 'donate') {
+      loadFullDonateConfig()
+    }
+  }, [activeTab])
 
   if (!isAdmin) {
     return (

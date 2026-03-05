@@ -37,6 +37,7 @@ interface AuthContextType {
   recordUsage: (module: string, action: string, details?: string) => void
   // 打赏配置
   donateConfig: DonateConfig
+  loadFullDonateConfig: () => Promise<void>
   updateDonateConfig: (config: Partial<DonateConfig>) => Promise<void>
   uploadQrcode: (file: File) => Promise<string>
   deleteQrcode: () => Promise<void>
@@ -62,11 +63,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // On mount: check token and fetch user + donate config
   useEffect(() => {
     const init = async () => {
-      // Always fetch donate config (public)
-      try {
-        const config = await donateApi.getConfig()
-        setDonateConfig(config)
-      } catch { /* ignore */ }
+      // Fetch donate config in background (non-blocking)
+      donateApi.getConfig().then(config => setDonateConfig(config)).catch(() => {})
 
       // Check existing token
       if (authApi.hasToken()) {
@@ -150,6 +148,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setDonateConfig(updated)
   }
 
+  const loadFullDonateConfig = async (): Promise<void> => {
+    try {
+      const config = await donateApi.getFullConfig()
+      setDonateConfig(config)
+    } catch { /* ignore */ }
+  }
+
   const uploadQrcode = async (file: File): Promise<string> => {
     const result = await donateApi.uploadQrcode(file)
     setDonateConfig(prev => ({ ...prev, qrcodeImage: result.qrcodeImage }))
@@ -163,7 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshDonateConfig = async (): Promise<void> => {
     try {
-      const config = await donateApi.getConfig()
+      const config = await donateApi.getFullConfig()
       setDonateConfig(config)
     } catch { /* ignore */ }
   }
@@ -187,6 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       toggleUserRole,
       recordUsage,
       donateConfig,
+      loadFullDonateConfig,
       updateDonateConfig,
       uploadQrcode,
       deleteQrcode,

@@ -92,7 +92,7 @@ const learningTimeline = [
 
 export default function LandingPage({ onNavigate }: LandingPageProps) {
   const { getVersionLabel, codeSource } = useVersion()
-  const { user, isAuthenticated, isAdmin, logout, donateConfig } = useAuth()
+  const { user, isAuthenticated, isAdmin, logout, donateConfig, loadFullDonateConfig } = useAuth()
   const [showDonate, setShowDonate] = useState(false)
 
   return (
@@ -115,7 +115,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
               <>
                 {donateConfig.enabled && donateConfig.qrcodeImage && (
                   <button
-                    onClick={() => setShowDonate(true)}
+                    onClick={() => { loadFullDonateConfig().then(() => setShowDonate(true)) }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-pink-400 hover:bg-pink-500/10 transition-colors"
                   >
                     <Heart className="w-4 h-4" />
@@ -445,7 +445,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
         <section className="container mx-auto px-6 py-12">
           <div className="max-w-2xl mx-auto">
             <div
-              onClick={() => setShowDonate(true)}
+              onClick={() => { loadFullDonateConfig().then(() => setShowDonate(true)) }}
               className="relative rounded-2xl bg-gradient-to-r from-pink-500/10 via-rose-500/5 to-orange-500/10 border border-pink-500/20 hover:border-pink-500/40 p-8 text-center cursor-pointer group transition-all"
             >
               <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-pink-500/5 to-orange-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />

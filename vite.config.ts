@@ -6,6 +6,9 @@ import { defineConfig } from "vite"
 export default defineConfig({
   base: '/mysql-analyzer/',
   plugins: [react()],
+  build: {
+    target: ['es2020', 'chrome80', 'safari13', 'firefox78'],
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

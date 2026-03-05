@@ -12,7 +12,23 @@ function removeToken(): void {
   localStorage.removeItem('mysql_analyzer_token');
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error('请求超时，请检查网络后重试');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function request<T>(path: string, options: RequestInit = {}, retries = 1): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -22,21 +38,41 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}${path}`, {
+        ...options,
+        headers,
+        // 手机微信浏览器需要显式设置 mode 和 credentials
+        mode: 'cors' as RequestMode,
+      }, 15000);
 
-  if (res.status === 401) {
-    removeToken();
-    throw new Error('登录已过期，请重新登录');
-  }
+      if (res.status === 401) {
+        removeToken();
+        throw new Error('登录已过期，请重新登录');
+      }
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || '请求失败');
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || '请求失败');
+      }
+      return data;
+    } catch (err: any) {
+      lastError = err;
+      // 不重试认证错误和业务错误
+      if (err.message === '登录已过期，请重新登录' || (err.message && !err.message.includes('超时') && !err.message.includes('Failed to fetch') && !err.message.includes('NetworkError') && !err.message.includes('network'))) {
+        throw err;
+      }
+      // 最后一次尝试也失败了
+      if (attempt === retries) {
+        throw err;
+      }
+      // 等待后重试
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+    }
   }
-  return data;
+  throw lastError || new Error('请求失败');
 }
 
 // ============ Auth API ============
@@ -127,7 +163,7 @@ export const authApi = {
       const data = await request<{ success: boolean; user: UserData; token: string }>('/api/auth/oauth', {
         method: 'POST',
         body: JSON.stringify({ provider }),
-      });
+      }, 2); // 重试2次，共3次尝试，应对手机微信浏览器网络不稳定
       if (data.token) setToken(data.token);
       return data;
     } catch (e: any) {
@@ -185,8 +221,12 @@ export const donateApi = {
     return await request('/api/donate/config');
   },
 
+  async getFullConfig(): Promise<DonateConfigData> {
+    return await request('/api/donate/config?full=1');
+  },
+
   async updateConfig(config: Partial<DonateConfigData>): Promise<DonateConfigData> {
-    return await request('/api/donate/config', {
+    return await request('/api/donate/config?full=1', {
       method: 'PUT',
       body: JSON.stringify(config),
     });
