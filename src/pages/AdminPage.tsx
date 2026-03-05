@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -6,10 +6,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/contexts/AuthContext'
+import type { User, UsageRecord, SystemStats } from '@/contexts/AuthContext'
 import {
   ArrowLeft, Users, Activity, BarChart3, Shield, Trash2,
   Search, UserCog, Clock, TrendingUp, Eye, LogOut,
-  ChevronRight, Database, FileText, Monitor, Globe,
+  Database, FileText, Monitor, Globe,
   AlertTriangle, Heart, Upload, ImageIcon, X, Check,
   ToggleLeft, ToggleRight
 } from 'lucide-react'
@@ -21,7 +22,6 @@ interface AdminPageProps {
 
 type AdminTab = 'overview' | 'users' | 'analytics' | 'logs' | 'donate'
 
-// 微信 SVG Icon
 function WechatIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -59,7 +59,7 @@ function ProviderIcon({ provider, className }: { provider: string; className?: s
 }
 
 export default function AdminPage({ onNavigate }: AdminPageProps) {
-  const { user, isAdmin, getAllUsers, getUsageRecords, getSystemStats, deleteUser, toggleUserRole, logout, donateConfig, updateDonateConfig } = useAuth()
+  const { user, isAdmin, logout, donateConfig, updateDonateConfig, uploadQrcode, deleteQrcode, getAllUsers, getUsageRecords, getSystemStats, deleteUser, toggleUserRole } = useAuth()
   const [activeTab, setActiveTab] = useState<AdminTab>('overview')
   const [searchQuery, setSearchQuery] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
@@ -68,9 +68,38 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
   const [donateDesc, setDonateDesc] = useState(donateConfig.description)
   const [donateSaved, setDonateSaved] = useState(false)
 
-  const allUsers = useMemo(() => getAllUsers(), [getAllUsers])
-  const usageRecords = useMemo(() => getUsageRecords(100), [getUsageRecords])
-  const stats = useMemo(() => getSystemStats(), [getSystemStats])
+  // Async data states
+  const [allUsers, setAllUsers] = useState<User[]>([])
+  const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([])
+  const [stats, setStats] = useState<SystemStats | null>(null)
+  const [dataLoading, setDataLoading] = useState(true)
+
+  useEffect(() => {
+    if (!isAdmin) return
+    const fetchData = async () => {
+      setDataLoading(true)
+      try {
+        const [users, records, statsData] = await Promise.all([
+          getAllUsers(),
+          getUsageRecords(100),
+          getSystemStats(),
+        ])
+        setAllUsers(users)
+        setUsageRecords(records)
+        setStats(statsData)
+      } catch (e) {
+        console.error('Failed to load admin data:', e)
+      }
+      setDataLoading(false)
+    }
+    fetchData()
+  }, [isAdmin, getAllUsers, getUsageRecords, getSystemStats])
+
+  // Sync donate config changes
+  useEffect(() => {
+    setDonateTitle(donateConfig.title)
+    setDonateDesc(donateConfig.description)
+  }, [donateConfig.title, donateConfig.description])
 
   if (!isAdmin) {
     return (
@@ -86,6 +115,14 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
             </Button>
           </CardContent>
         </Card>
+      </div>
+    )
+  }
+
+  if (dataLoading || !stats) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
+        <div className="text-slate-400 text-lg">加载中...</div>
       </div>
     )
   }
@@ -123,7 +160,37 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
     }
   }
 
-  // Bar chart 组件（纯 CSS）
+  const handleDeleteUser = async (userId: string) => {
+    try {
+      await deleteUser(userId)
+      setAllUsers(prev => prev.filter(u => u.id !== userId))
+      setDeleteConfirm(null)
+    } catch (e) {
+      console.error('Delete user failed:', e)
+    }
+  }
+
+  const handleToggleRole = async (userId: string) => {
+    try {
+      const newRole = await toggleUserRole(userId)
+      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole as 'user' | 'admin' } : u))
+    } catch (e) {
+      console.error('Toggle role failed:', e)
+    }
+  }
+
+  const handleQrcodeUpload = async (file: File) => {
+    if (file.size > 2 * 1024 * 1024) {
+      alert('图片大小不能超过 2MB')
+      return
+    }
+    try {
+      await uploadQrcode(file)
+    } catch (e: any) {
+      alert(e.message || '上传失败')
+    }
+  }
+
   const BarChart = ({ data, maxValue }: { data: { label: string; value: number; color?: string }[]; maxValue: number }) => (
     <div className="space-y-2">
       {data.map((item, i) => (
@@ -141,7 +208,6 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
     </div>
   )
 
-  // 迷你折线图（纯 CSS）
   const SparkLine = ({ data, color = 'bg-blue-500' }: { data: number[]; color?: string }) => {
     const max = Math.max(...data, 1)
     return (
@@ -164,10 +230,7 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="container mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => onNavigate('landing')}
-              className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors"
-            >
+            <button onClick={() => onNavigate('landing')} className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors">
               <ArrowLeft className="w-4 h-4" />
               <span className="hidden sm:inline">返回前台</span>
             </button>
@@ -185,11 +248,7 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
               <span className="text-sm text-slate-300">{user?.displayName}</span>
               <Badge className="text-[10px] bg-amber-500/20 text-amber-300 border-amber-500/30">管理员</Badge>
             </div>
-            <button
-              onClick={() => { logout(); onNavigate('landing') }}
-              className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-all"
-              title="退出登录"
-            >
+            <button onClick={() => { logout(); onNavigate('landing') }} className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-all" title="退出登录">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -197,16 +256,14 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
       </header>
 
       <div className="container mx-auto px-6 py-6">
-        {/* Tab 导航 */}
+        {/* Tab Nav */}
         <div className="flex gap-1 mb-6 p-1 bg-slate-800/40 rounded-xl w-fit border border-slate-700/30">
           {tabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === tab.id
-                  ? 'bg-slate-700 text-white shadow-lg'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                activeTab === tab.id ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
               }`}
             >
               {tab.icon}
@@ -215,71 +272,32 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
           ))}
         </div>
 
-        {/* ===== 数据概览 Tab ===== */}
+        {/* ===== Overview ===== */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* 统计卡片 */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                      <Users className="w-5 h-5 text-blue-400" />
+              {[
+                { icon: <Users className="w-5 h-5 text-blue-400" />, bg: 'bg-blue-500/20', badge: 'bg-blue-500/10 text-blue-400 border-blue-500/20', badgeText: '总计', value: stats.totalUsers, label: '注册用户' },
+                { icon: <Activity className="w-5 h-5 text-green-400" />, bg: 'bg-green-500/20', badge: 'bg-green-500/10 text-green-400 border-green-500/20', badgeText: '今日', value: stats.activeToday, label: '活跃用户' },
+                { icon: <Monitor className="w-5 h-5 text-amber-400" />, bg: 'bg-amber-500/20', badge: 'bg-amber-500/10 text-amber-400 border-amber-500/20', badgeText: '累计', value: stats.totalSessions, label: '登录会话' },
+                { icon: <Clock className="w-5 h-5 text-violet-400" />, bg: 'bg-violet-500/20', badge: 'bg-violet-500/10 text-violet-400 border-violet-500/20', badgeText: '平均', value: `${stats.avgSessionMinutes}`, label: '会话时长(min)' },
+              ].map((s, i) => (
+                <Card key={i} className="bg-slate-900/50 border-slate-800">
+                  <CardContent className="p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className={`w-10 h-10 rounded-lg ${s.bg} flex items-center justify-center`}>{s.icon}</div>
+                      <Badge className={`${s.badge} text-[10px]`}>{s.badgeText}</Badge>
                     </div>
-                    <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px]">总计</Badge>
-                  </div>
-                  <div className="text-2xl font-bold">{stats.totalUsers}</div>
-                  <div className="text-xs text-slate-400 mt-1">注册用户</div>
-                </CardContent>
-              </Card>
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
-                      <Activity className="w-5 h-5 text-green-400" />
-                    </div>
-                    <Badge className="bg-green-500/10 text-green-400 border-green-500/20 text-[10px]">今日</Badge>
-                  </div>
-                  <div className="text-2xl font-bold">{stats.activeToday}</div>
-                  <div className="text-xs text-slate-400 mt-1">活跃用户</div>
-                </CardContent>
-              </Card>
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                      <Monitor className="w-5 h-5 text-amber-400" />
-                    </div>
-                    <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-[10px]">累计</Badge>
-                  </div>
-                  <div className="text-2xl font-bold">{stats.totalSessions}</div>
-                  <div className="text-xs text-slate-400 mt-1">登录会话</div>
-                </CardContent>
-              </Card>
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-10 h-10 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                      <Clock className="w-5 h-5 text-violet-400" />
-                    </div>
-                    <Badge className="bg-violet-500/10 text-violet-400 border-violet-500/20 text-[10px]">平均</Badge>
-                  </div>
-                  <div className="text-2xl font-bold">{stats.avgSessionMinutes}<span className="text-sm text-slate-400 ml-1">min</span></div>
-                  <div className="text-xs text-slate-400 mt-1">会话时长</div>
-                </CardContent>
-              </Card>
+                    <div className="text-2xl font-bold">{s.value}</div>
+                    <div className="text-xs text-slate-400 mt-1">{s.label}</div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
 
-            {/* 图表行 */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* 日活趋势 */}
               <Card className="bg-slate-900/50 border-slate-800">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-blue-400" />
-                    每日活跃用户（近14天）
-                  </CardTitle>
-                </CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><TrendingUp className="w-4 h-4 text-blue-400" />每日活跃用户（近14天）</CardTitle></CardHeader>
                 <CardContent>
                   <SparkLine data={stats.dailyActive.map(d => d.count)} color="bg-blue-500" />
                   <div className="flex justify-between mt-1">
@@ -288,15 +306,8 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                   </div>
                 </CardContent>
               </Card>
-
-              {/* 注册趋势 */}
               <Card className="bg-slate-900/50 border-slate-800">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Users className="w-4 h-4 text-green-400" />
-                    新用户注册（近14天）
-                  </CardTitle>
-                </CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Users className="w-4 h-4 text-green-400" />新用户注册（近14天）</CardTitle></CardHeader>
                 <CardContent>
                   <SparkLine data={stats.registrationTrend.map(d => d.count)} color="bg-green-500" />
                   <div className="flex justify-between mt-1">
@@ -308,47 +319,26 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* 模块使用 */}
               <Card className="bg-slate-900/50 border-slate-800">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-amber-400" />
-                    模块使用频次
-                  </CardTitle>
-                </CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><BarChart3 className="w-4 h-4 text-amber-400" />模块使用频次</CardTitle></CardHeader>
                 <CardContent>
                   <BarChart
                     data={stats.moduleUsage.slice(0, 6).map((m, i) => ({
-                      label: m.module,
-                      value: m.count,
-                      color: [
-                        'bg-gradient-to-r from-blue-500 to-cyan-500',
-                        'bg-gradient-to-r from-amber-500 to-orange-500',
-                        'bg-gradient-to-r from-green-500 to-emerald-500',
-                        'bg-gradient-to-r from-red-500 to-pink-500',
-                        'bg-gradient-to-r from-violet-500 to-purple-500',
-                        'bg-gradient-to-r from-slate-500 to-slate-400',
-                      ][i] || 'bg-blue-500',
+                      label: m.module, value: m.count,
+                      color: ['bg-gradient-to-r from-blue-500 to-cyan-500','bg-gradient-to-r from-amber-500 to-orange-500','bg-gradient-to-r from-green-500 to-emerald-500','bg-gradient-to-r from-red-500 to-pink-500','bg-gradient-to-r from-violet-500 to-purple-500','bg-gradient-to-r from-slate-500 to-slate-400'][i] || 'bg-blue-500',
                     }))}
                     maxValue={Math.max(...stats.moduleUsage.map(m => m.count), 1)}
                   />
                 </CardContent>
               </Card>
-
-              {/* 登录方式分布 */}
               <Card className="bg-slate-900/50 border-slate-800">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Globe className="w-4 h-4 text-violet-400" />
-                    登录方式分布
-                  </CardTitle>
-                </CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Globe className="w-4 h-4 text-violet-400" />登录方式分布</CardTitle></CardHeader>
                 <CardContent>
                   <div className="space-y-3">
                     {stats.providerDistribution.map((p, i) => {
                       const total = stats.providerDistribution.reduce((sum, x) => sum + x.count, 0)
                       const pct = Math.round((p.count / total) * 100)
-                      const colors = ['from-cyan-500 to-blue-500', 'from-green-500 to-emerald-500', 'from-blue-400 to-indigo-500', 'from-slate-400 to-slate-500']
+                      const colors = ['from-cyan-500 to-blue-500','from-green-500 to-emerald-500','from-blue-400 to-indigo-500','from-slate-400 to-slate-500']
                       return (
                         <div key={i}>
                           <div className="flex items-center justify-between mb-1">
@@ -359,10 +349,7 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                             <span className="text-sm text-slate-400">{p.count} ({pct}%)</span>
                           </div>
                           <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full bg-gradient-to-r ${colors[i % colors.length]} transition-all duration-700`}
-                              style={{ width: `${pct}%` }}
-                            />
+                            <div className={`h-full rounded-full bg-gradient-to-r ${colors[i % colors.length]} transition-all duration-700`} style={{ width: `${pct}%` }} />
                           </div>
                         </div>
                       )
@@ -374,51 +361,30 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
           </div>
         )}
 
-        {/* ===== 用户管理 Tab ===== */}
+        {/* ===== Users ===== */}
         {activeTab === 'users' && (
           <div className="space-y-4">
-            {/* 搜索 */}
             <div className="flex items-center gap-3">
               <div className="relative flex-1 max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <Input
-                  placeholder="搜索用户名、名称、邮箱..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="pl-9 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-600"
-                />
+                <Input placeholder="搜索用户名、名称、邮箱..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-600" />
               </div>
-              <Badge className="bg-slate-800 text-slate-300 border-slate-700">
-                共 {filteredUsers.length} 个用户
-              </Badge>
+              <Badge className="bg-slate-800 text-slate-300 border-slate-700">共 {filteredUsers.length} 个用户</Badge>
             </div>
-
-            {/* 用户列表 */}
             <div className="space-y-2">
               {filteredUsers.map(u => (
                 <Card key={u.id} className="bg-slate-900/50 border-slate-800 hover:border-slate-700 transition-colors">
                   <CardContent className="p-4">
                     <div className="flex items-center gap-4">
-                      {/* 头像 */}
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
-                        u.role === 'admin'
-                          ? 'bg-gradient-to-br from-amber-500 to-orange-500'
-                          : 'bg-gradient-to-br from-blue-500 to-cyan-500'
-                      }`}>
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${u.role === 'admin' ? 'bg-gradient-to-br from-amber-500 to-orange-500' : 'bg-gradient-to-br from-blue-500 to-cyan-500'}`}>
                         {u.displayName[0]}
                       </div>
-
-                      {/* 用户信息 */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-white">{u.displayName}</span>
                           <span className="text-xs text-slate-500">@{u.username}</span>
-                          {u.role === 'admin' && (
-                            <Badge className="text-[10px] bg-amber-500/20 text-amber-300 border-amber-500/30">管理员</Badge>
-                          )}
-                          <Badge className={`text-[10px] ${providerColor(u.provider)}`}>
-                            {providerLabel(u.provider)}
-                          </Badge>
+                          {u.role === 'admin' && <Badge className="text-[10px] bg-amber-500/20 text-amber-300 border-amber-500/30">管理员</Badge>}
+                          <Badge className={`text-[10px] ${providerColor(u.provider)}`}>{providerLabel(u.provider)}</Badge>
                         </div>
                         <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
                           <span>{u.email}</span>
@@ -427,67 +393,33 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                           <span>最后登录: {u.lastLoginAt}</span>
                         </div>
                       </div>
-
-                      {/* 操作按钮 */}
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {u.id !== 'admin_001' && (
                           <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 text-xs h-8"
-                              onClick={() => toggleUserRole(u.id)}
-                            >
+                            <Button variant="outline" size="sm" className="border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 text-xs h-8" onClick={() => handleToggleRole(u.id)}>
                               <UserCog className="w-3 h-3 mr-1" />
                               {u.role === 'admin' ? '降为普通' : '设为管理'}
                             </Button>
                             {deleteConfirm === u.id ? (
                               <div className="flex items-center gap-1">
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  className="text-xs h-8"
-                                  onClick={() => { deleteUser(u.id); setDeleteConfirm(null) }}
-                                >
-                                  确认删除
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="border-slate-700 text-xs h-8"
-                                  onClick={() => setDeleteConfirm(null)}
-                                >
-                                  取消
-                                </Button>
+                                <Button variant="destructive" size="sm" className="text-xs h-8" onClick={() => handleDeleteUser(u.id)}>确认删除</Button>
+                                <Button variant="outline" size="sm" className="border-slate-700 text-xs h-8" onClick={() => setDeleteConfirm(null)}>取消</Button>
                               </div>
                             ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="border-red-800/50 text-red-400 hover:bg-red-500/10 text-xs h-8"
-                                onClick={() => setDeleteConfirm(u.id)}
-                              >
+                              <Button variant="outline" size="sm" className="border-red-800/50 text-red-400 hover:bg-red-500/10 text-xs h-8" onClick={() => setDeleteConfirm(u.id)}>
                                 <Trash2 className="w-3 h-3" />
                               </Button>
                             )}
                           </>
                         )}
-                        {u.id === 'admin_001' && (
-                          <Badge className="text-[10px] bg-slate-800 text-slate-500 border-slate-700">
-                            超级管理员
-                          </Badge>
-                        )}
+                        {u.id === 'admin_001' && <Badge className="text-[10px] bg-slate-800 text-slate-500 border-slate-700">超级管理员</Badge>}
                       </div>
                     </div>
-
-                    {/* 模块访问 */}
                     {u.modulesVisited.length > 0 && (
                       <div className="flex items-center gap-1.5 mt-2 ml-14">
                         <Eye className="w-3 h-3 text-slate-600" />
                         {u.modulesVisited.map(m => (
-                          <Badge key={m} variant="outline" className="text-[10px] border-slate-700 text-slate-500 py-0">
-                            {m}
-                          </Badge>
+                          <Badge key={m} variant="outline" className="text-[10px] border-slate-700 text-slate-500 py-0">{m}</Badge>
                         ))}
                       </div>
                     )}
@@ -498,28 +430,15 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
           </div>
         )}
 
-        {/* ===== 使用分析 Tab ===== */}
+        {/* ===== Analytics ===== */}
         {activeTab === 'analytics' && (
           <div className="space-y-6">
-            {/* 模块使用详情 */}
             <Card className="bg-slate-900/50 border-slate-800">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-blue-400" />
-                  模块使用详情
-                </CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base flex items-center gap-2"><BarChart3 className="w-4 h-4 text-blue-400" />模块使用详情</CardTitle></CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {stats.moduleUsage.map((m, i) => {
-                    const colors = [
-                      'from-blue-500 to-cyan-500',
-                      'from-amber-500 to-orange-500',
-                      'from-green-500 to-emerald-500',
-                      'from-red-500 to-pink-500',
-                      'from-violet-500 to-purple-500',
-                      'from-slate-400 to-slate-500',
-                    ]
+                    const colors = ['from-blue-500 to-cyan-500','from-amber-500 to-orange-500','from-green-500 to-emerald-500','from-red-500 to-pink-500','from-violet-500 to-purple-500','from-slate-400 to-slate-500']
                     return (
                       <div key={i} className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/30">
                         <div className="flex items-center justify-between mb-2">
@@ -527,10 +446,7 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                           <span className="text-lg font-bold text-white">{m.count}</span>
                         </div>
                         <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full bg-gradient-to-r ${colors[i % colors.length]}`}
-                            style={{ width: `${m.percentage}%` }}
-                          />
+                          <div className={`h-full rounded-full bg-gradient-to-r ${colors[i % colors.length]}`} style={{ width: `${m.percentage}%` }} />
                         </div>
                         <span className="text-[10px] text-slate-500 mt-1 block">{m.percentage}% 的使用占比</span>
                       </div>
@@ -539,36 +455,16 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                 </div>
               </CardContent>
             </Card>
-
-            {/* 用户活跃度排名 */}
             <Card className="bg-slate-900/50 border-slate-800">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-amber-400" />
-                  用户活跃度排名
-                </CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="w-4 h-4 text-amber-400" />用户活跃度排名</CardTitle></CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {[...allUsers]
-                    .sort((a, b) => b.totalUsageMinutes - a.totalUsageMinutes)
-                    .slice(0, 10)
-                    .map((u, i) => (
+                  {[...allUsers].sort((a, b) => b.totalUsageMinutes - a.totalUsageMinutes).slice(0, 10).map((u, i) => (
                     <div key={u.id} className="flex items-center gap-3">
-                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                        i === 0 ? 'bg-amber-500/30 text-amber-300' :
-                        i === 1 ? 'bg-slate-400/30 text-slate-300' :
-                        i === 2 ? 'bg-orange-500/30 text-orange-300' :
-                        'bg-slate-800 text-slate-500'
-                      }`}>
-                        {i + 1}
-                      </span>
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${i === 0 ? 'bg-amber-500/30 text-amber-300' : i === 1 ? 'bg-slate-400/30 text-slate-300' : i === 2 ? 'bg-orange-500/30 text-orange-300' : 'bg-slate-800 text-slate-500'}`}>{i + 1}</span>
                       <span className="text-sm text-white w-24 truncate">{u.displayName}</span>
                       <div className="flex-1 h-4 bg-slate-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all"
-                          style={{ width: `${(u.totalUsageMinutes / Math.max(allUsers[0]?.totalUsageMinutes || 1, 1)) * 100}%` }}
-                        />
+                        <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all" style={{ width: `${(u.totalUsageMinutes / Math.max(allUsers[0]?.totalUsageMinutes || 1, 1)) * 100}%` }} />
                       </div>
                       <span className="text-xs text-slate-400 w-20 text-right">{u.totalUsageMinutes} 分钟</span>
                       <span className="text-xs text-slate-500 w-16 text-right">{u.loginCount} 次</span>
@@ -580,46 +476,21 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
           </div>
         )}
 
-        {/* ===== 操作日志 Tab ===== */}
+        {/* ===== Logs ===== */}
         {activeTab === 'logs' && (
           <Card className="bg-slate-900/50 border-slate-800">
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="w-4 h-4 text-green-400" />
-                操作日志（最近 100 条）
-              </CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><FileText className="w-4 h-4 text-green-400" />操作日志（最近 100 条）</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-1">
                 {usageRecords.slice(0, 100).map(record => (
-                  <div
-                    key={record.id}
-                    className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-800/40 transition-colors"
-                  >
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                      record.action === '登录' ? 'bg-green-500' :
-                      record.action === '注册' ? 'bg-blue-500' :
-                      record.action === '登出' ? 'bg-slate-500' :
-                      'bg-amber-500'
-                    }`} />
+                  <div key={record.id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-800/40 transition-colors">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${record.action === '登录' ? 'bg-green-500' : record.action === '注册' ? 'bg-blue-500' : record.action === '登出' ? 'bg-slate-500' : 'bg-amber-500'}`} />
                     <span className="text-xs text-slate-400 w-36 flex-shrink-0">{record.timestamp}</span>
                     <span className="text-xs text-cyan-400 w-20 flex-shrink-0 font-mono">@{record.username}</span>
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] w-16 justify-center flex-shrink-0 ${
-                        record.action === '登录' ? 'border-green-500/30 text-green-400' :
-                        record.action === '注册' ? 'border-blue-500/30 text-blue-400' :
-                        record.action === '登出' ? 'border-slate-500/30 text-slate-400' :
-                        'border-amber-500/30 text-amber-400'
-                      }`}
-                    >
-                      {record.action}
-                    </Badge>
+                    <Badge variant="outline" className={`text-[10px] w-16 justify-center flex-shrink-0 ${record.action === '登录' ? 'border-green-500/30 text-green-400' : record.action === '注册' ? 'border-blue-500/30 text-blue-400' : record.action === '登出' ? 'border-slate-500/30 text-slate-400' : 'border-amber-500/30 text-amber-400'}`}>{record.action}</Badge>
                     <span className="text-xs text-slate-500 w-20 flex-shrink-0">{record.module}</span>
                     <span className="text-xs text-slate-400 truncate">{record.details}</span>
-                    {record.duration ? (
-                      <span className="text-[10px] text-slate-600 flex-shrink-0 ml-auto">{record.duration}min</span>
-                    ) : null}
+                    {record.duration ? <span className="text-[10px] text-slate-600 flex-shrink-0 ml-auto">{record.duration}min</span> : null}
                   </div>
                 ))}
               </div>
@@ -627,99 +498,48 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
           </Card>
         )}
 
-        {/* ===== 打赏设置 Tab ===== */}
+        {/* ===== Donate Settings ===== */}
         {activeTab === 'donate' && (
           <div className="space-y-6 max-w-2xl">
-            {/* 开关 */}
             <Card className="bg-slate-900/50 border-slate-800">
               <CardContent className="p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-pink-500/20 flex items-center justify-center">
-                      <Heart className="w-5 h-5 text-pink-400" />
-                    </div>
+                    <div className="w-10 h-10 rounded-lg bg-pink-500/20 flex items-center justify-center"><Heart className="w-5 h-5 text-pink-400" /></div>
                     <div>
                       <div className="font-medium text-white">打赏功能</div>
-                      <div className="text-xs text-slate-400 mt-0.5">
-                        {donateConfig.enabled ? '已开启 - 用户可在页面看到打赏入口' : '已关闭 - 打赏入口不会显示'}
-                      </div>
+                      <div className="text-xs text-slate-400 mt-0.5">{donateConfig.enabled ? '已开启 - 用户可在页面看到打赏入口' : '已关闭 - 打赏入口不会显示'}</div>
                     </div>
                   </div>
-                  <button
-                    onClick={() => updateDonateConfig({ enabled: !donateConfig.enabled })}
-                    className="transition-colors"
-                  >
-                    {donateConfig.enabled ? (
-                      <ToggleRight className="w-10 h-10 text-pink-400" />
-                    ) : (
-                      <ToggleLeft className="w-10 h-10 text-slate-600" />
-                    )}
+                  <button onClick={() => updateDonateConfig({ enabled: !donateConfig.enabled })}>
+                    {donateConfig.enabled ? <ToggleRight className="w-10 h-10 text-pink-400" /> : <ToggleLeft className="w-10 h-10 text-slate-600" />}
                   </button>
                 </div>
               </CardContent>
             </Card>
 
-            {/* 收款码上传 */}
             <Card className="bg-slate-900/50 border-slate-800">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <ImageIcon className="w-4 h-4 text-green-400" />
-                  微信收款码
-                </CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base flex items-center gap-2"><ImageIcon className="w-4 h-4 text-green-400" />微信收款码</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (!file) return
-                    if (file.size > 2 * 1024 * 1024) {
-                      alert('图片大小不能超过 2MB')
-                      return
-                    }
-                    const reader = new FileReader()
-                    reader.onload = (ev) => {
-                      const result = ev.target?.result as string
-                      updateDonateConfig({ qrcodeImage: result })
-                    }
-                    reader.readAsDataURL(file)
-                    e.target.value = ''
-                  }}
-                />
-
+                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) handleQrcodeUpload(file)
+                  e.target.value = ''
+                }} />
                 {donateConfig.qrcodeImage ? (
                   <div className="space-y-3">
                     <div className="relative inline-block">
-                      <img
-                        src={donateConfig.qrcodeImage}
-                        alt="收款码"
-                        className="w-48 h-48 object-contain rounded-xl border border-slate-700 bg-white p-2"
-                      />
-                      <button
-                        onClick={() => updateDonateConfig({ qrcodeImage: '' })}
-                        className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-colors"
-                      >
+                      <img src={donateConfig.qrcodeImage} alt="收款码" className="w-48 h-48 object-contain rounded-xl border border-slate-700 bg-white p-2" />
+                      <button onClick={() => deleteQrcode()} className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-colors">
                         <X className="w-3.5 h-3.5 text-white" />
                       </button>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-slate-700 text-slate-400 hover:text-white"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Upload className="w-4 h-4 mr-1.5" />
-                      更换收款码
+                    <Button variant="outline" size="sm" className="border-slate-700 text-slate-400 hover:text-white" onClick={() => fileInputRef.current?.click()}>
+                      <Upload className="w-4 h-4 mr-1.5" />更换收款码
                     </Button>
                   </div>
                 ) : (
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-48 h-48 rounded-xl border-2 border-dashed border-slate-700 hover:border-green-500/50 flex flex-col items-center justify-center gap-3 cursor-pointer transition-colors group"
-                  >
+                  <div onClick={() => fileInputRef.current?.click()} className="w-48 h-48 rounded-xl border-2 border-dashed border-slate-700 hover:border-green-500/50 flex flex-col items-center justify-center gap-3 cursor-pointer transition-colors group">
                     <div className="w-12 h-12 rounded-lg bg-slate-800 group-hover:bg-green-500/10 flex items-center justify-center transition-colors">
                       <Upload className="w-6 h-6 text-slate-500 group-hover:text-green-400 transition-colors" />
                     </div>
@@ -732,80 +552,41 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
               </CardContent>
             </Card>
 
-            {/* 打赏文案设置 */}
             <Card className="bg-slate-900/50 border-slate-800">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-amber-400" />
-                  打赏文案
-                </CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base flex items-center gap-2"><FileText className="w-4 h-4 text-amber-400" />打赏文案</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-1.5">
                   <Label className="text-slate-400 text-xs">标题</Label>
-                  <Input
-                    value={donateTitle}
-                    onChange={e => { setDonateTitle(e.target.value); setDonateSaved(false) }}
-                    placeholder="如：请作者喝杯咖啡"
-                    className="bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-600"
-                  />
+                  <Input value={donateTitle} onChange={e => { setDonateTitle(e.target.value); setDonateSaved(false) }} placeholder="如：请作者喝杯咖啡" className="bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-600" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-slate-400 text-xs">描述</Label>
-                  <textarea
-                    value={donateDesc}
-                    onChange={e => { setDonateDesc(e.target.value); setDonateSaved(false) }}
-                    placeholder="感谢支持的文案..."
-                    rows={3}
-                    className="w-full rounded-md bg-slate-800/50 border border-slate-700 text-white placeholder:text-slate-600 px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
-                  />
+                  <textarea value={donateDesc} onChange={e => { setDonateDesc(e.target.value); setDonateSaved(false) }} placeholder="感谢支持的文案..." rows={3} className="w-full rounded-md bg-slate-800/50 border border-slate-700 text-white placeholder:text-slate-600 px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none" />
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button
-                    size="sm"
-                    className="bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white"
-                    onClick={() => {
-                      updateDonateConfig({ title: donateTitle, description: donateDesc })
-                      setDonateSaved(true)
-                      setTimeout(() => setDonateSaved(false), 2000)
-                    }}
-                  >
-                    {donateSaved ? (
-                      <><Check className="w-4 h-4 mr-1.5" />已保存</>
-                    ) : (
-                      <>保存文案</>
-                    )}
+                  <Button size="sm" className="bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white" onClick={async () => {
+                    await updateDonateConfig({ title: donateTitle, description: donateDesc })
+                    setDonateSaved(true)
+                    setTimeout(() => setDonateSaved(false), 2000)
+                  }}>
+                    {donateSaved ? <><Check className="w-4 h-4 mr-1.5" />已保存</> : <>保存文案</>}
                   </Button>
-                  {donateSaved && (
-                    <span className="text-xs text-green-400">设置已保存</span>
-                  )}
+                  {donateSaved && <span className="text-xs text-green-400">设置已保存</span>}
                 </div>
               </CardContent>
             </Card>
 
-            {/* 预览 */}
             {donateConfig.enabled && donateConfig.qrcodeImage && (
               <Card className="bg-slate-900/50 border-slate-800">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Eye className="w-4 h-4 text-blue-400" />
-                    效果预览
-                  </CardTitle>
-                </CardHeader>
+                <CardHeader><CardTitle className="text-base flex items-center gap-2"><Eye className="w-4 h-4 text-blue-400" />效果预览</CardTitle></CardHeader>
                 <CardContent>
                   <div className="max-w-xs mx-auto bg-slate-800/60 rounded-2xl border border-slate-700/50 p-6 text-center space-y-4">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-pink-500 to-rose-500 flex items-center justify-center mx-auto">
-                      <Heart className="w-6 h-6 text-white" />
-                    </div>
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-pink-500 to-rose-500 flex items-center justify-center mx-auto"><Heart className="w-6 h-6 text-white" /></div>
                     <div>
                       <h4 className="text-lg font-semibold text-white">{donateConfig.title}</h4>
                       <p className="text-sm text-slate-400 mt-1">{donateConfig.description}</p>
                     </div>
-                    <img
-                      src={donateConfig.qrcodeImage}
-                      alt="收款码预览"
-                      className="w-40 h-40 object-contain mx-auto rounded-xl bg-white p-2"
-                    />
+                    <img src={donateConfig.qrcodeImage} alt="收款码预览" className="w-40 h-40 object-contain mx-auto rounded-xl bg-white p-2" />
                     <p className="text-[11px] text-slate-500">微信扫一扫，感谢您的支持</p>
                   </div>
                 </CardContent>

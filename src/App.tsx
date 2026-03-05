@@ -22,7 +22,15 @@ const ADMIN_ROUTES: Route[] = ['admin']
 
 function AppRoutes() {
   const [currentRoute, setCurrentRoute] = useState<Route>('landing')
-  const { isAuthenticated, isAdmin } = useAuth()
+  const { isAuthenticated, isAdmin, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
+        <div className="text-slate-400 text-lg">加载中...</div>
+      </div>
+    )
+  }
 
   const navigateTo = (route: Route) => {
     // 未登录时，访问非公开页面 → 跳转登录
